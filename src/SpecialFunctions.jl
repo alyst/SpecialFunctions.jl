@@ -78,7 +78,9 @@ export
     expintx,
     sinint,
     cosint,
-    lbinomial
+    lbinomial,
+    lambertw,
+    lambertwbp
 
 include("bessel.jl")
 include("erf.jl")
@@ -90,6 +92,7 @@ include("gamma_inc.jl")
 include("betanc.jl")
 include("beta_inc.jl")
 include("chainrules.jl")
+include("lambertw.jl")
 include("deprecated.jl")
 
 for f in (:digamma, :erf, :erfc, :erfcinv, :erfcx, :erfi, :erfinv, :logerfc, :logerfcx,

@@ -31,6 +31,7 @@ tests = [
     "gamma_inc",
     "gamma",
     "sincosint",
+    "lambertw",
     "other_tests",
     "chainrules"
 ]
