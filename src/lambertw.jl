@@ -51,29 +51,37 @@ _lambertw(x::Real, k::Integer, maxits::Integer) = _lambertw(x, Val(Int(k)), maxi
 # In particular, the fancy initial condition selection does not seem to help speed.
 function _lambertw(x::T, ::Val{0}, maxits::Integer) where T<:Real
     isfinite(x) || return x
-    one_t = one(T)
-    oneoe = -T(inve)  # The branch point
-    x == oneoe && return -one_t
-    oneoe < x || throw(DomainError(x))
-    itwo_t = 1 / convert(T, 2)
-    if x > one_t
-        lx = log(x)
-        llx = log(lx)
-        x0 = lx - llx - log(one_t - llx / lx) * itwo_t
+    # check the domain/set the initial point of Iacono-Boyd iterations
+    # according to Lóczi, L, 2022 (see lambertw_iacono_iterate())
+    if x > ℯ  # (13) in Lóczi, L, 2022
+        β0 = log(x) - log(log(x))
+    elseif x == ℯ
+        return one(T)
+    elseif x > 0 # (21)
+        β0 = x * T(inve)
+    elseif x == 0
+        return zero(T)
+    elseif x > -T(inve) # (24)
+        y = ℯ * x
+        z = sqrt(one(T) + y)
+        β0 = y * log1p(z) / (z * (one(T) + z))
+    elseif x == -T(inve)
+        return -one(T) # -1/e is the branching point
     else
-        x0 = (567//1000) * x
+        throw(DomainError(x))
     end
-    return lambertw_root_finding(x, x0, maxits)
+    return lambertw_root_finding(_lambertw_iacono_iterate, x, β0, maxits)
 end
 
 # Real x, k = -1
 function _lambertw(x::T, ::Val{-1}, maxits::Integer) where T<:Real
-    oneoe = -T(inve)
-    x == oneoe && return -one(T) # W approaches -1 as x -> -1/e from above
-    oneoe < x || throw(DomainError(x))  # branch domain exludes x < -1/e
-    x == zero(T) && return -convert(T, Inf) # W decreases w/o bound as x -> 0 from below
-    x < zero(T) || throw(DomainError(x))
-    return lambertw_root_finding(x, log(-x), maxits)
+    (x < -T(inve) || x > 0) && throw(DomainError(x))  # branch domain exludes x < -1/e & x > 0
+    x == -T(inve) && return -one(T) # W approaches -1 as x -> -1/e from above
+    x == 0 && return -convert(T, Inf) # W decreases w/o bound as x -> 0 from below
+    # set the initial point of Iacono-Boyd iterations
+    # according to Lóczi, L, 2022; equation (27)
+    β0 = x <= -1//4 ? -one(T) - sqrt(2 * (one(T) + ℯ * x)) : log(-x) - log(-log(-x))
+    return lambertw_root_finding(_lambertw_iacono_iterate, x, β0, maxits)
 end
 
 _lambertw(x::Real, k::Val, maxits::Integer) =
@@ -112,32 +120,45 @@ function _lambertw(z::Complex{T}, k::Integer, maxits::Integer) where T<:Real
         w = log(z)
         k != 0 ? w += complex(0, 2*k*pi) : nothing
     end
-    return lambertw_root_finding(z, w, maxits)
+    return lambertw_root_finding(_lambertw_halley_iterate, z, w, maxits)
 end
 
-### root finding, iterative solution
+# Iacono-Boyd iterative scheme
+# see R. Iacono and J.P. Boyd, "New approximations to the principal real-valued branch of the Lambert W-function",
+#      Adv. Comput. Math., 43 (2017), pp. 1403-1436, doi://10.1007/s10444-017-9530-3
+# and Lóczi, L. "Guaranteed and high-precision evaluation of the Lambert W function",
+#     App. Math. and Comp., 433 (2022), 127406. doi://10.1016/j.amc.2022.127406
+# for the discussion of the convergence
+@inline _lambertw_iacono_iterate(z::T, x::T) where T<:Number =
+    x / (1 + x) * (1 + log(z / x))
 
-# Use Halley's root-finding method to find
-# x = lambertw(z) with initial point x0.
-function lambertw_root_finding(z::T, x0::T, maxits::Integer) where T <: Number
-    x = x0
-    lastx = x
+# Halley-type iterative scheme
+@inline function _lambertw_halley_iterate(z::T, x::T) where T <: Number
+    ex = exp(x)
+    xexz = x * ex - z
+    x1 = x + 1
+    return x - xexz / (ex * x1 - (x + 2) * xexz / (2 * x1))
+end
+
+# iterative method to find the root of
+# x = lambertw(z) with initial point x0
+# and x_{i+1} = f(x_i)
+function lambertw_root_finding(f, z::T, x0::T, maxits::Integer) where T <: Number
+    lastx = x = x0
     lastdiff = zero(real(T))
     converged = false
-    for _ in 1:maxits
-        ex = exp(x)
-        xexz = x * ex - z
-        x1 = x + 1
-        x -= xexz / (ex * x1 - (x + 2) * xexz / (2 * x1))
+    for i in 1:maxits
+        x = f(z, x)
         xdiff = abs(lastx - x)
         if xdiff <= 3 * eps(lastdiff) || lastdiff == xdiff  # second condition catches two-value cycle
             converged = true
+            @info "lambertw_root_finding($f, $(float(z))) converged in $i iterations."
             break
         end
         lastx = x
         lastdiff = xdiff
     end
-    converged || @warn "lambertw($z) did not converge in $maxits iterations."
+    converged || @warn "lambertw($f, $z) did not converge in $maxits iterations: $x."
     return x
 end
 
